@@ -1,0 +1,69 @@
+name: Flutter CI/CD
+
+on:
+  push:
+    branches:
+      - main  # Ou qualquer branch onde deseja fazer o deploy automático
+  workflow_dispatch:  # Permitir deploy manual
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.5.3'  # Defina a versão Flutter que você deseja usar
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build Flutter web app
+        run: flutter build web  # Você pode ajustar isso para outros builds como mobile ou desktop
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: flutter-web-app
+          path: build/web/  # Caminho onde o build do Flutter é gerado (neste caso, para web)
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'  # Deploy manual ou após o push para a branch main
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: flutter-web-app
+          path: ./artifact/
+
+      - name: Copy Flutter app to EC2
+        uses: appleboy/scp-action@v0.1.5
+        with:
+          host: ${{ secrets.AWS_EC2_HOST }}
+          username: ${{ secrets.AWS_EC2_USER }}
+          key: ${{ secrets.AWS_EC2_KEY }}
+          source: ./artifact/build/web/  # Caminho do build Flutter
+          target: /home/ubuntu/flutter-app/  # Diretório no EC2
+
+      - name: Run Flutter web app on EC2
+        uses: appleboy/ssh-action@v0.1.5
+        with:
+          host: ${{ secrets.AWS_EC2_HOST }}
+          username: ${{ secrets.AWS_EC2_USER }}
+          key: ${{ secrets.AWS_EC2_KEY }}
+          script: |
+            cd /home/ubuntu/flutter-app/
+            # Rodar o Flutter no modo web na porta 58153
+            nohup python3 -m http.server 58153 --directory build/web/ > flutter_log.txt 2>&1 &
